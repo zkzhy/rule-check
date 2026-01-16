@@ -1,0 +1,17 @@
+{
+  "paths": {
+    "state_dir": "state",
+    "output_file": "data/pending_audits.jsonl"
+  },
+  "yuheng": {
+    "base_url": "https://yhope.pl.in.chaitin.net",
+    "verify_ssl": false,
+    "timeout_s": 20
+  },
+  "ai": {
+    "provider": "chaitin",
+    "model": "gpt-5.1",
+    "timeout_s": 120,
+    "base_url": "https://aiapi.chaitin.net/v1"
+  }
+}

@@ -1,0 +1,14 @@
+# Config
+config/secrets.local.json
+config/secrets.json
+.env
+
+# Data
+data/*.jsonl
+data/state/
+*.jsonl
+
+# Build
+workflow
+dist/
+bin/
