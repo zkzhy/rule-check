@@ -20,4 +20,3 @@ func TestNormalizePath(t *testing.T) {
 		t.Fatalf("unexpected: %s", got)
 	}
 }
-

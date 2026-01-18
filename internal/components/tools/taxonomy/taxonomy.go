@@ -54,8 +54,8 @@ var (
 	// key: tactic_name
 	// value: technique_name -> node
 	techByTactic map[string]map[string]*techniqueNode
-	once      sync.Once
-	loadErr   error
+	once         sync.Once
+	loadErr      error
 )
 
 // Load initializes the taxonomy from the given CSV path.

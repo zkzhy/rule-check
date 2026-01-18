@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -61,6 +62,29 @@ type RootConfig struct {
 	Paths  PathsConfig  `json:"paths"`
 	Yuheng YuhengConfig `json:"yuheng"`
 	AI     AIConfig     `json:"ai"`
+}
+
+func (c *RootConfig) StateDir() string {
+	if c == nil {
+		return "data"
+	}
+	s := strings.TrimSpace(c.Paths.StateDir)
+	if s == "" {
+		return "data"
+	}
+	return s
+}
+
+func (c *RootConfig) PendingAuditsPath() string {
+	return filepath.Join(c.StateDir(), "pending_audits.jsonl")
+}
+
+func (c *RootConfig) PendingAuditsResultsPath() string {
+	return filepath.Join(c.StateDir(), "pending_audits_results.jsonl")
+}
+
+func (c *RootConfig) SubmittedIDsPath() string {
+	return filepath.Join(c.StateDir(), "submitted_ids.jsonl")
 }
 
 func Load() (*RootConfig, error) {
@@ -246,14 +270,20 @@ func readJSON[T any](path string) (T, error) {
 func readRawJSON(path string) (map[string]any, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return map[string]any{}, nil
+		if os.IsNotExist(err) {
+			return map[string]any{}, nil
+		}
+		return nil, err
 	}
 	if len(data) == 0 {
 		return map[string]any{}, nil
 	}
 	var m map[string]any
 	if err := json.Unmarshal(data, &m); err != nil {
-		return map[string]any{}, nil
+		return nil, err
+	}
+	if m == nil {
+		m = map[string]any{}
 	}
 	return m, nil
 }

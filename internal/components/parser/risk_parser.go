@@ -79,9 +79,9 @@ func ApplyStructuredFields(base map[string]any, structured map[string]any) {
 	}
 }
 
-func ClampScore(v int) int {
-	if v < 0 {
-		return 0
+func ClampRiskScore(v int) int {
+	if v < 1 {
+		return 1
 	}
 	if v > 10 {
 		return 10
@@ -120,14 +120,22 @@ func NormalizeNumber(v any) int {
 	}
 }
 
+func NormalizeRiskScore(v any) (int, bool) {
+	n := NormalizeNumber(v)
+	if n < 1 {
+		return 0, false
+	}
+	return ClampRiskScore(n), true
+}
+
 func extractScoreFromMap(m map[string]any) int {
 	v, ok := m["risk_score"]
 	if !ok {
 		return -1
 	}
-	n := NormalizeNumber(v)
-	if n < 0 {
+	score, ok := NormalizeRiskScore(v)
+	if !ok {
 		return -1
 	}
-	return ClampScore(n)
+	return score
 }

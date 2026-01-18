@@ -30,14 +30,11 @@ func RunRiskAnalysis(ctx context.Context, cfg *config.RootConfig) error {
 }
 
 func RunRiskAnalysisWithOptions(ctx context.Context, cfg *config.RootConfig, opt RiskAnalysisOptions) error {
-	if err := os.MkdirAll("data", 0o755); err != nil {
-		return fmt.Errorf("create data dir failed: %w", err)
+	inFile := cfg.PendingAuditsPath()
+	outResultsFile := cfg.PendingAuditsResultsPath()
+	if err := os.MkdirAll(filepath.Dir(outResultsFile), 0o755); err != nil {
+		return fmt.Errorf("create state dir failed: %w", err)
 	}
-	inFile := cfg.Paths.OutputFile
-	if inFile == "" {
-		inFile = "data/pending_audits.jsonl"
-	}
-	outResultsFile := "data/pending_audits_results.jsonl"
 
 	items, err := loadPendingRecords(inFile)
 	if err != nil {
@@ -239,12 +236,13 @@ func RunRiskAnalysisWithOptions(ctx context.Context, cfg *config.RootConfig, opt
 			}
 
 			if existing, ok := newData["risk_score"]; ok {
-				num := parser.NormalizeNumber(existing)
-				if num >= 0 {
-					newData["risk_score"] = parser.ClampScore(num)
+				if v, ok := parser.NormalizeRiskScore(existing); ok {
+					newData["risk_score"] = v
+				} else {
+					delete(newData, "risk_score")
 				}
-			} else if score >= 0 {
-				newData["risk_score"] = parser.ClampScore(score)
+			} else if v, ok := parser.NormalizeRiskScore(score); ok {
+				newData["risk_score"] = v
 			}
 
 			resultsRec := map[string]any{"id": rec.ID, "generated_at": utcISO(), "data": newData}
@@ -451,7 +449,7 @@ func parseScore(text string) int {
 		return -1
 	}
 	if val < 1 {
-		return 1
+		return -1
 	}
 	if val > 10 {
 		return 10

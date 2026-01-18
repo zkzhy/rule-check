@@ -1,9 +1,9 @@
 package fetch
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -38,8 +38,7 @@ func Run(cfg *config.RootConfig) error {
 	}
 	fmt.Println("OK")
 
-	outFile := cfg.Paths.OutputFile
-	// Ensure output directory exists (data/)
+	outFile := cfg.PendingAuditsPath()
 	outDir := filepath.Dir(outFile)
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
@@ -121,7 +120,7 @@ func login(cl *httpclient.Client, cfg *config.RootConfig) (string, error) {
 		"password": cfg.Yuheng.Password,
 	}
 	b, _ := json.Marshal(body)
-	req, _ := http.NewRequest(http.MethodPost, fullURL, bytesReader(b))
+	req, _ := http.NewRequest(http.MethodPost, fullURL, bytes.NewReader(b))
 	req.Header.Set("Content-Type", "application/json")
 	var out loginResp
 	code, err := cl.DoJSON(req, &out)
@@ -197,7 +196,7 @@ func fetchList(cl *httpclient.Client, cfg *config.RootConfig, token string, page
 			"page_size": pageSize,
 		}
 		b, _ := json.Marshal(body)
-		req, _ = http.NewRequest(http.MethodPost, fullURL, bytesReader(b))
+		req, _ = http.NewRequest(http.MethodPost, fullURL, bytes.NewReader(b))
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -284,22 +283,4 @@ func resolveURL(base, ref string) (string, error) {
 		return "", err
 	}
 	return bu.ResolveReference(ru).String(), nil
-}
-
-func bytesReader(b []byte) *bytesReaderWrapper {
-	return &bytesReaderWrapper{b: b}
-}
-
-type bytesReaderWrapper struct {
-	pos int
-	b   []byte
-}
-
-func (r *bytesReaderWrapper) Read(p []byte) (int, error) {
-	if r.pos >= len(r.b) {
-		return 0, io.EOF
-	}
-	n := copy(p, r.b[r.pos:])
-	r.pos += n
-	return n, nil
 }

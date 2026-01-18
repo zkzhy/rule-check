@@ -6,6 +6,7 @@ config/secrets.json
 # Data
 data/*.jsonl
 data/state/
+state/
 *.jsonl
 
 # Build

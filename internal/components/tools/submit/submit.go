@@ -2,12 +2,13 @@ package submit
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +24,14 @@ type riskRecord struct {
 }
 
 func Run(cfg *config.RootConfig) error {
+	return RunWithOptions(cfg, SubmitOptions{})
+}
+
+type SubmitOptions struct {
+	Resume bool
+}
+
+func RunWithOptions(cfg *config.RootConfig, opt SubmitOptions) error {
 	taxPath := "ATT&CK.csv"
 	if _, err := os.Stat(taxPath); os.IsNotExist(err) {
 		taxPath = "../ATT&CK.csv"
@@ -31,7 +40,7 @@ func Run(cfg *config.RootConfig) error {
 		fmt.Printf("[Warning] Failed to load taxonomy from %s: %v\n", taxPath, err)
 	}
 
-	inputFile := "data/pending_audits_results.jsonl"
+	inputFile := cfg.PendingAuditsResultsPath()
 	f, err := os.Open(inputFile)
 	if err != nil {
 		return err
@@ -48,12 +57,29 @@ func Run(cfg *config.RootConfig) error {
 	}
 	fmt.Println("OK")
 
+	submittedIDs := map[string]bool{}
+	submittedIDsFile := cfg.SubmittedIDsPath()
+	if err := os.MkdirAll(filepath.Dir(submittedIDsFile), 0o755); err != nil {
+		return err
+	}
+	if opt.Resume {
+		submittedIDs, err = loadSubmittedIDs(submittedIDsFile)
+		if err != nil {
+			return err
+		}
+	}
+	wSubmitted, err := os.OpenFile(submittedIDsFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer wSubmitted.Close()
+
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	success := 0
 	fail := 0
+	total := 0
 
-	var records []riskRecord
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -63,15 +89,10 @@ func Run(cfg *config.RootConfig) error {
 		if err := json.Unmarshal([]byte(line), &rec); err != nil {
 			continue
 		}
-		records = append(records, rec)
-	}
-	if err := scanner.Err(); err != nil {
-		return err
-	}
-
-	fmt.Printf("[Info] Found %d records to process\n", len(records))
-
-	for _, rec := range records {
+		total++
+		if opt.Resume && submittedIDs[strings.TrimSpace(fmt.Sprint(rec.ID))] {
+			continue
+		}
 		data := rec.Data
 		if data == nil {
 			continue
@@ -153,15 +174,73 @@ func Run(cfg *config.RootConfig) error {
 		if submitReview(cl, cfg, tok, rawDetail, score, suggestion) {
 			fmt.Println("Success")
 			success++
+			id := strings.TrimSpace(fmt.Sprint(rec.ID))
+			if id != "" {
+				submittedIDs[id] = true
+				b, _ := json.Marshal(map[string]any{
+					"id":           rec.ID,
+					"submitted_at": utcISO(),
+				})
+				_, _ = wSubmitted.Write(b)
+				_, _ = wSubmitted.WriteString("\n")
+			}
 		} else {
 			fmt.Println("Failed")
 			fail++
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
 
+	if opt.Resume {
+		fmt.Printf("[Info] Found %d records to scan, submitted %d new, failed %d\n", total, success, fail)
+	} else {
+		fmt.Printf("[Info] Found %d records to process\n", total)
+	}
 	fmt.Printf("[Summary] Success: %d, Failed: %d\n", success, fail)
 	return nil
+}
+
+func loadSubmittedIDs(path string) (map[string]bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]bool{}, nil
+		}
+		return nil, err
+	}
+	defer f.Close()
+
+	ids := map[string]bool{}
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var rec struct {
+			ID any `json:"id"`
+		}
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			continue
+		}
+		id := strings.TrimSpace(fmt.Sprint(rec.ID))
+		if id == "" {
+			continue
+		}
+		ids[id] = true
+	}
+	if err := scanner.Err(); err != nil {
+		return ids, err
+	}
+	return ids, nil
+}
+
+func utcISO() string {
+	return time.Now().UTC().Format(time.RFC3339)
 }
 
 func login(cl *httpclient.Client, cfg *config.RootConfig) (string, error) {
@@ -171,7 +250,7 @@ func login(cl *httpclient.Client, cfg *config.RootConfig) (string, error) {
 	}
 	body := map[string]any{"username": cfg.Yuheng.Username, "password": cfg.Yuheng.Password}
 	b, _ := json.Marshal(body)
-	req, _ := http.NewRequest(http.MethodPost, fullURL, bytesReader(b))
+	req, _ := http.NewRequest(http.MethodPost, fullURL, bytes.NewReader(b))
 	req.Header.Set("Content-Type", "application/json")
 	var out struct {
 		Data struct {
@@ -261,7 +340,7 @@ func submitReview(cl *httpclient.Client, cfg *config.RootConfig, token string, e
 	}
 
 	b, _ := json.Marshal(reviewData)
-	req, _ := http.NewRequest(http.MethodPut, fullURL, bytesReader(b))
+	req, _ := http.NewRequest(http.MethodPut, fullURL, bytes.NewReader(b))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Cookie", "AccessToken="+token+";")
@@ -293,24 +372,6 @@ func resolveURL(base, ref string) (string, error) {
 		return "", err
 	}
 	return bu.ResolveReference(ru).String(), nil
-}
-
-type bytesReaderWrapper struct {
-	pos int
-	b   []byte
-}
-
-func bytesReader(b []byte) *bytesReaderWrapper {
-	return &bytesReaderWrapper{b: b}
-}
-
-func (r *bytesReaderWrapper) Read(p []byte) (int, error) {
-	if r.pos >= len(r.b) {
-		return 0, io.EOF
-	}
-	n := copy(p, r.b[r.pos:])
-	r.pos += n
-	return n, nil
 }
 
 func normalizeScore(v any) int {
